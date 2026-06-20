@@ -1,0 +1,68 @@
+services:
+  bithumb-collector:
+    build:
+      context: .
+      dockerfile: Dockerfile.collectors
+    command:
+      - python
+      - -m
+      - crypto_pipeline.bithumb_collector
+      - --symbol
+      - BTC
+      - --intervals
+      - 1m,3m,5m,10m,15m,30m
+      - --loop
+      - --sleep
+      - "60"
+    environment:
+      DATABASE_URL: sqlite:///data/crypto_pipeline.db
+      BITHUMB_PUBLIC_API_BASE_URL: ${BITHUMB_PUBLIC_API_BASE_URL:-https://api.bithumb.com/public}
+      BITHUMB_V1_API_BASE_URL: ${BITHUMB_V1_API_BASE_URL:-https://api.bithumb.com/v1}
+      HTTP_TIMEOUT_SECONDS: ${HTTP_TIMEOUT_SECONDS:-10}
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+
+  binance-collector:
+    build:
+      context: .
+      dockerfile: Dockerfile.collectors
+    command:
+      - python
+      - -m
+      - crypto_pipeline.binance_collector
+      - --symbol
+      - BTCUSDT
+      - --intervals
+      - 1m,3m,5m,10m,15m,30m
+      - --loop
+      - --sleep
+      - "60"
+    environment:
+      DATABASE_URL: sqlite:///data/crypto_pipeline.db
+      BINANCE_BASE_URL: ${BINANCE_BASE_URL:-https://api.binance.com/api/v3}
+      HTTP_TIMEOUT_SECONDS: ${HTTP_TIMEOUT_SECONDS:-10}
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+
+  account-collector:
+    build:
+      context: .
+      dockerfile: Dockerfile.collectors
+    command:
+      - python
+      - -m
+      - crypto_pipeline.account_collector
+      - --loop
+      - --sleep
+      - "60"
+    environment:
+      DATABASE_URL: sqlite:///data/crypto_pipeline.db
+      ACCOUNT_API_BASE_URL: ${ACCOUNT_API_BASE_URL:-https://api.bithumb.com}
+      ACCOUNT_REQUEST_HEADERS_JSON: ${ACCOUNT_REQUEST_HEADERS_JSON:-}
+      HTTP_TIMEOUT_SECONDS: ${HTTP_TIMEOUT_SECONDS:-10}
+    volumes:
+      - ./data:/app/data
+    profiles: ["private-account"]
+    restart: unless-stopped
