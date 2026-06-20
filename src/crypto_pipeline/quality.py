@@ -6,39 +6,24 @@ from typing import Iterable
 
 from .models import Candle, Gap
 
-
-INTERVAL_MINUTES = {
-    "1m": 1,
-    "3m": 3,
-    "5m": 5,
-    "10m": 10,
-    "15m": 15,
-    "30m": 30,
-    "1h": 60,
-}
+INTERVAL_MINUTES = {"1m": 1, "3m": 3, "5m": 5, "10m": 10, "15m": 15, "30m": 30}
 
 
 def detect_duplicates(candles: Iterable[Candle]) -> list[Candle]:
     rows = list(candles)
-    counts = Counter((row.symbol, row.interval, row.timestamp) for row in rows)
-    return [row for row in rows if counts[(row.symbol, row.interval, row.timestamp)] > 1]
+    counts = Counter((r.symbol, r.interval, r.timestamp) for r in rows)
+    return [r for r in rows if counts[(r.symbol, r.interval, r.timestamp)] > 1]
 
 
 def detect_invalid(candles: Iterable[Candle]) -> list[tuple[Candle, list[str]]]:
-    findings: list[tuple[Candle, list[str]]] = []
-    for candle in candles:
-        errors = candle.validate()
-        if errors:
-            findings.append((candle, errors))
-    return findings
+    return [(c, errors) for c in candles if (errors := c.validate())]
 
 
 def detect_gaps(candles: Iterable[Candle]) -> list[Gap]:
-    rows = sorted(candles, key=lambda row: row.timestamp)
+    rows = sorted(candles, key=lambda r: r.timestamp)
     if len(rows) < 2:
         return []
-    interval = rows[0].interval
-    step = timedelta(minutes=_interval_minutes(interval))
+    step = timedelta(minutes=_interval_minutes(rows[0].interval))
     gaps: list[Gap] = []
     previous = rows[0]
     for current in rows[1:]:
@@ -46,21 +31,12 @@ def detect_gaps(candles: Iterable[Candle]) -> list[Gap]:
             raise ValueError("detect_gaps accepts one symbol/interval dataset at a time")
         missing = int((current.timestamp - previous.timestamp) / step) - 1
         if missing > 0:
-            gaps.append(
-                Gap(
-                    symbol=current.symbol,
-                    interval=current.interval,
-                    start=previous.timestamp + step,
-                    end=current.timestamp - step,
-                    expected_count=missing,
-                )
-            )
+            gaps.append(Gap(current.symbol, current.interval, previous.timestamp + step, current.timestamp - step, missing))
         previous = current
     return gaps
 
 
 def _interval_minutes(interval: str) -> int:
-    try:
-        return INTERVAL_MINUTES[interval]
-    except KeyError as exc:
-        raise ValueError(f"unsupported interval: {interval}") from exc
+    if interval not in INTERVAL_MINUTES:
+        raise ValueError(f"unsupported interval: {interval}")
+    return INTERVAL_MINUTES[interval]
