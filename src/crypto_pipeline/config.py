@@ -23,10 +23,16 @@ class Settings:
                 os.getenv("SOURCE_API_TIMEOUT_SECONDS", "10")
             ),
             demo_symbols=_csv("DEMO_SYMBOLS", "BTC,ETH"),
-            demo_intervals=_csv("DEMO_INTERVALS", "1m,5m"),
+            demo_intervals=_csv(
+                "DEMO_INTERVALS", "1m,3m,5m,10m,15m,30m"
+            ),
         )
 
 
 def _csv(name: str, default: str) -> tuple[str, ...]:
     raw = os.getenv(name, default)
-    return tuple(item.strip().upper() if name == "DEMO_SYMBOLS" else item.strip() for item in raw.split(",") if item.strip())
+    return tuple(
+        item.strip().upper() if name == "DEMO_SYMBOLS" else item.strip()
+        for item in raw.split(",")
+        if item.strip()
+    )
