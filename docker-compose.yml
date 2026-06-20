@@ -1,0 +1,11 @@
+services:
+  pipeline:
+    build: .
+    environment:
+      DATABASE_URL: sqlite:///data/crypto_pipeline_demo.sqlite3
+      SOURCE_API_BASE_URL: ${SOURCE_API_BASE_URL:-}
+      SOURCE_API_TIMEOUT_SECONDS: ${SOURCE_API_TIMEOUT_SECONDS:-10}
+      DEMO_SYMBOLS: ${DEMO_SYMBOLS:-BTC,ETH}
+      DEMO_INTERVALS: ${DEMO_INTERVALS:-1m,5m}
+    volumes:
+      - ./data:/app/data
