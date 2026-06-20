@@ -1,58 +1,94 @@
 # Crypto Data Pipeline
 
-Public portfolio project for an auditable cryptocurrency market-data pipeline.
+A public, executable version of a cryptocurrency data collection and data-quality system.
 
-## Workflow
+## What actually runs
+
+This repository contains three collector services:
+
+- `bithumb_collector`: fetches public candles, trades, and orderbook snapshots from Bithumb
+- `binance_collector`: fetches public candles, trades, and orderbook snapshots from Binance
+- `account_collector`: fetches private account balances when a runtime authorization header is supplied
+
+Collected data is stored in a local SQLite database at `data/crypto_pipeline.db`.
+
+Supported candle intervals are exactly:
+
+```text
+1m, 3m, 5m, 10m, 15m, 30m
+```
+
+`1h` is not supported.
+
+## Run the collectors
+
+Bithumb once:
+
+```bash
+python -m crypto_pipeline.bithumb_collector \
+  --symbol BTC \
+  --intervals 1m,3m,5m,10m,15m,30m
+```
+
+Binance once:
+
+```bash
+python -m crypto_pipeline.binance_collector \
+  --symbol BTCUSDT \
+  --intervals 1m,3m,5m,10m,15m,30m
+```
+
+Run both public collectors continuously with Docker:
+
+```bash
+docker compose -f docker-compose.collectors.yml up --build
+```
+
+Run only one collector:
+
+```bash
+docker compose -f docker-compose.collectors.yml up --build bithumb-collector
+```
+
+## Account collector
+
+The account collector calls the real private account endpoint and stores a timestamped account snapshot. No key, password, token, or authorization value is committed to this repository.
+
+Supply a valid runtime request-header JSON value through `ACCOUNT_REQUEST_HEADERS_JSON`, then run:
+
+```bash
+docker compose -f docker-compose.collectors.yml \
+  --profile private-account up --build account-collector
+```
+
+## Stored tables
+
+- `market_candles`
+- `market_trades`
+- `orderbook_snapshots`
+- `account_snapshots`
+
+All tables are created automatically.
+
+## Data-quality workflow
+
+The repository also includes the data-quality core:
 
 ```text
 Collect -> Validate -> Detect -> Repair -> Recalculate -> Revalidate -> Audit
 ```
 
-## What is included
-
-- Generic candle domain model
-- Gap, duplicate, and invalid OHLCV detection
-- Credential-free HTTP source adapter
-- Idempotent SQLite upsert flow
-- Indicator recalculation
-- Post-repair validation
-- Persistent audit events
-- CLI entry point
-- Docker and Docker Compose setup
-- Unit tests
+It detects candle gaps, duplicates, and invalid OHLCV data, supports repair through a source adapter, recalculates indicators, and records audit events.
 
 ## Security and privacy
 
-This repository intentionally excludes all production-specific information.
+This public repository intentionally contains no production-specific information:
 
-- No API keys or account secrets
-- No database passwords or usernames
-- No private IP addresses or hostnames
-- No NAS paths or deployment details
-- No production database or table names
-- No personal identifiers
-- No private exchange endpoints
+- no database passwords, usernames, or private connection strings
+- no API keys, signing keys, tokens, or account credentials
+- no private IP addresses or hostnames
+- no NAS paths or deployment details
+- no production database names
+- no personal identifiers
 
-All runtime values are supplied through environment variables. The checked-in `.env.example` contains placeholders only.
-
-## Quick start
-
-```bash
-cp .env.example .env
-python -m pip install -e '.[dev]'
-pytest
-crypto-pipeline --symbol BTC --interval 1m
-```
-
-Docker:
-
-```bash
-docker compose build
-docker compose run --rm pipeline --symbol BTC --interval 1m
-```
-
-To enable repair against a compatible public candle API, set `SOURCE_API_BASE_URL` and add `--repair`.
-
-## Status
-
-The public core has been initialized. Additional demo fixtures, documentation, and CI will be added incrementally.
+All private runtime values must be injected through environment variables and must never be committed.
