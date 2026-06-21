@@ -4,11 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "crypto-data-pipeline"
-version = "0.2.0"
+version = "1.0.0"
 description = "Executable cryptocurrency collectors and auditable data-quality pipeline"
 requires-python = ">=3.11"
 dependencies = [
   "requests>=2.31,<3",
+  "pandas>=2.2,<3",
+  "numpy>=1.26,<3",
 ]
 
 [project.optional-dependencies]
