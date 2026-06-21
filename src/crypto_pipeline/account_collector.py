@@ -1,31 +1,51 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import hashlib
+import hmac
 import json
 import os
 import time
+import uuid
 
 import requests
 
 from .collector_db import CollectorDatabase
 
 
+def _b64url(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+
+
 class AccountCollector:
     def __init__(self, database: CollectorDatabase) -> None:
         self.database = database
+        self.access_value = os.getenv("ACCOUNT_ACCESS_VALUE", "")
+        self.signing_value = os.getenv("ACCOUNT_SIGNING_VALUE", "")
         self.base_url = os.getenv("ACCOUNT_API_BASE_URL", "https://api.bithumb.com").rstrip("/")
         self.timeout = float(os.getenv("HTTP_TIMEOUT_SECONDS", "10"))
-        raw_headers = os.getenv("ACCOUNT_REQUEST_HEADERS_JSON", "")
-        if not raw_headers:
-            raise ValueError("ACCOUNT_REQUEST_HEADERS_JSON is required")
-        self.headers = json.loads(raw_headers)
-        if not isinstance(self.headers, dict):
-            raise ValueError("ACCOUNT_REQUEST_HEADERS_JSON must be a JSON object")
+        if not self.access_value or not self.signing_value:
+            raise ValueError("ACCOUNT_ACCESS_VALUE and ACCOUNT_SIGNING_VALUE are required")
+
+    def _authorization_header(self) -> dict[str, str]:
+        payload = {
+            "access_key": self.access_value,
+            "nonce": str(uuid.uuid4()),
+            "timestamp": round(time.time() * 1000),
+        }
+        encoded_header = _b64url(b'{"alg":"HS256","typ":"JWT"}')
+        encoded_payload = _b64url(json.dumps(payload, separators=(",", ":")).encode())
+        message = f"{encoded_header}.{encoded_payload}".encode()
+        signature = _b64url(
+            hmac.new(self.signing_value.encode(), message, hashlib.sha256).digest()
+        )
+        return {"Authorization": f"Bearer {encoded_header}.{encoded_payload}.{signature}"}
 
     def collect_once(self) -> dict[str, float | int]:
         response = requests.get(
             f"{self.base_url}/v1/accounts",
-            headers=self.headers,
+            headers=self._authorization_header(),
             timeout=self.timeout,
         )
         response.raise_for_status()
