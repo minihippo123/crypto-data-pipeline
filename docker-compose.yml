@@ -1,66 +1,59 @@
 services:
   bithumb-collector:
     build: .
-    command:
-      - python
-      - -m
-      - crypto_pipeline.bithumb_collector
-      - --symbol
-      - ${BITHUMB_SYMBOL:-BTC}
-      - --intervals
-      - ${COLLECTOR_INTERVALS:-1m,3m,5m,10m,15m,30m}
-      - --loop
-      - --sleep
-      - ${COLLECTOR_SLEEP_SECONDS:-60}
+    command: ["python", "-m", "crypto_pipeline.bithumb_collector"]
     environment:
       DATABASE_URL: sqlite:///data/crypto_pipeline.db
+      BITHUMB_SYMBOLS: ${BITHUMB_SYMBOLS:-BTC,ETH,XRP,SOL,SUI}
       BITHUMB_PUBLIC_API_BASE_URL: ${BITHUMB_PUBLIC_API_BASE_URL:-https://api.bithumb.com/public}
       BITHUMB_V1_API_BASE_URL: ${BITHUMB_V1_API_BASE_URL:-https://api.bithumb.com/v1}
-      HTTP_TIMEOUT_SECONDS: ${HTTP_TIMEOUT_SECONDS:-10}
-      HTTP_MAX_RETRIES: ${HTTP_MAX_RETRIES:-3}
-      HTTP_RETRY_DELAY_SECONDS: ${HTTP_RETRY_DELAY_SECONDS:-1}
+      BITHUMB_PUBLIC_TIMEOUT_SECONDS: ${BITHUMB_PUBLIC_TIMEOUT_SECONDS:-5}
+      BITHUMB_CANDLE_TIMEOUT_SECONDS: ${BITHUMB_CANDLE_TIMEOUT_SECONDS:-10}
+      BITHUMB_CANDLE_MAX_RETRIES: ${BITHUMB_CANDLE_MAX_RETRIES:-3}
+      BITHUMB_CANDLE_RETRY_DELAY_SECONDS: ${BITHUMB_CANDLE_RETRY_DELAY_SECONDS:-1}
+      BITHUMB_LOOP_SLEEP_SECONDS: ${BITHUMB_LOOP_SLEEP_SECONDS:-0.2}
+      BITHUMB_ERROR_SLEEP_SECONDS: ${BITHUMB_ERROR_SLEEP_SECONDS:-5}
+      CANDLE_START_SECOND: ${CANDLE_START_SECOND:-0}
+      CANDLE_WINDOW_SECONDS: ${CANDLE_WINDOW_SECONDS:-10}
+      CANDLE_TASKS_PER_LOOP: ${CANDLE_TASKS_PER_LOOP:-3}
+      ORDERBOOK_DEPTH_ON: ${ORDERBOOK_DEPTH_ON:-1}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
     volumes:
       - ./data:/app/data
     restart: unless-stopped
 
   binance-collector:
     build: .
-    command:
-      - python
-      - -m
-      - crypto_pipeline.binance_collector
-      - --symbol
-      - ${BINANCE_SYMBOL:-BTCUSDT}
-      - --intervals
-      - ${COLLECTOR_INTERVALS:-1m,3m,5m,10m,15m,30m}
-      - --loop
-      - --sleep
-      - ${COLLECTOR_SLEEP_SECONDS:-60}
+    command: ["python", "-m", "crypto_pipeline.binance_collector"]
     environment:
       DATABASE_URL: sqlite:///data/crypto_pipeline.db
+      BINANCE_SYMBOLS: ${BINANCE_SYMBOLS:-BTCUSDT,ETHUSDT,XRPUSDT,SOLUSDT,SUIUSDT}
       BINANCE_BASE_URL: ${BINANCE_BASE_URL:-https://api.binance.com/api/v3}
       HTTP_TIMEOUT_SECONDS: ${HTTP_TIMEOUT_SECONDS:-10}
       HTTP_MAX_RETRIES: ${HTTP_MAX_RETRIES:-3}
       HTTP_RETRY_DELAY_SECONDS: ${HTTP_RETRY_DELAY_SECONDS:-1}
+      BINANCE_UPDATE_INTERVAL_SECONDS: ${BINANCE_UPDATE_INTERVAL_SECONDS:-0.1}
+      BINANCE_API_CALL_SLEEP_SECONDS: ${BINANCE_API_CALL_SLEEP_SECONDS:-0.1}
+      BINANCE_SYMBOL_SLEEP_SECONDS: ${BINANCE_SYMBOL_SLEEP_SECONDS:-0.5}
+      BINANCE_TRADES_LIMIT: ${BINANCE_TRADES_LIMIT:-1000}
+      BINANCE_KLINES_LIMIT: ${BINANCE_KLINES_LIMIT:-1000}
+      BINANCE_ORDERBOOK_LIMIT: ${BINANCE_ORDERBOOK_LIMIT:-100}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
     volumes:
       - ./data:/app/data
     restart: unless-stopped
 
   account-collector:
     build: .
-    command:
-      - python
-      - -m
-      - crypto_pipeline.account_collector
-      - --loop
-      - --sleep
-      - ${ACCOUNT_COLLECTOR_SLEEP_SECONDS:-60}
+    command: ["python", "-m", "crypto_pipeline.account_collector"]
     environment:
       DATABASE_URL: sqlite:///data/crypto_pipeline.db
       ACCOUNT_API_BASE_URL: ${ACCOUNT_API_BASE_URL:-https://api.bithumb.com}
       ACCOUNT_ACCESS_VALUE: ${ACCOUNT_ACCESS_VALUE:-}
       ACCOUNT_SIGNING_VALUE: ${ACCOUNT_SIGNING_VALUE:-}
+      ACCOUNT_COLLECT_INTERVAL_SECONDS: ${ACCOUNT_COLLECT_INTERVAL_SECONDS:-5}
       HTTP_TIMEOUT_SECONDS: ${HTTP_TIMEOUT_SECONDS:-10}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
     volumes:
       - ./data:/app/data
     profiles: ["private-account"]
