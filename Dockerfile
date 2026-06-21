@@ -8,4 +8,4 @@ RUN pip install --no-cache-dir .
 RUN useradd --create-home appuser && mkdir -p /app/data && chown -R appuser:appuser /app
 USER appuser
 
-ENTRYPOINT ["crypto-pipeline"]
+CMD ["python", "-m", "crypto_pipeline.bithumb_collector", "--symbol", "BTC"]
