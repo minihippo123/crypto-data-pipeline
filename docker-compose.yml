@@ -1,11 +1,83 @@
 services:
-  pipeline:
+  bithumb-collector:
     build: .
+    command:
+      - python
+      - -m
+      - crypto_pipeline.bithumb_collector
+      - --symbol
+      - ${BITHUMB_SYMBOL:-BTC}
+      - --intervals
+      - ${COLLECTOR_INTERVALS:-1m,3m,5m,10m,15m,30m}
+      - --loop
+      - --sleep
+      - ${COLLECTOR_SLEEP_SECONDS:-60}
     environment:
-      DATABASE_URL: sqlite:///data/crypto_pipeline_demo.sqlite3
-      SOURCE_API_BASE_URL: ${SOURCE_API_BASE_URL:-}
-      SOURCE_API_TIMEOUT_SECONDS: ${SOURCE_API_TIMEOUT_SECONDS:-10}
-      DEMO_SYMBOLS: ${DEMO_SYMBOLS:-BTC,ETH}
-      DEMO_INTERVALS: ${DEMO_INTERVALS:-1m,3m,5m,10m,15m,30m}
+      DATABASE_URL: sqlite:///data/crypto_pipeline.db
+      BITHUMB_PUBLIC_API_BASE_URL: ${BITHUMB_PUBLIC_API_BASE_URL:-https://api.bithumb.com/public}
+      BITHUMB_V1_API_BASE_URL: ${BITHUMB_V1_API_BASE_URL:-https://api.bithumb.com/v1}
+      HTTP_TIMEOUT_SECONDS: ${HTTP_TIMEOUT_SECONDS:-10}
+      HTTP_MAX_RETRIES: ${HTTP_MAX_RETRIES:-3}
+      HTTP_RETRY_DELAY_SECONDS: ${HTTP_RETRY_DELAY_SECONDS:-1}
     volumes:
       - ./data:/app/data
+    restart: unless-stopped
+
+  binance-collector:
+    build: .
+    command:
+      - python
+      - -m
+      - crypto_pipeline.binance_collector
+      - --symbol
+      - ${BINANCE_SYMBOL:-BTCUSDT}
+      - --intervals
+      - ${COLLECTOR_INTERVALS:-1m,3m,5m,10m,15m,30m}
+      - --loop
+      - --sleep
+      - ${COLLECTOR_SLEEP_SECONDS:-60}
+    environment:
+      DATABASE_URL: sqlite:///data/crypto_pipeline.db
+      BINANCE_BASE_URL: ${BINANCE_BASE_URL:-https://api.binance.com/api/v3}
+      HTTP_TIMEOUT_SECONDS: ${HTTP_TIMEOUT_SECONDS:-10}
+      HTTP_MAX_RETRIES: ${HTTP_MAX_RETRIES:-3}
+      HTTP_RETRY_DELAY_SECONDS: ${HTTP_RETRY_DELAY_SECONDS:-1}
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+
+  account-collector:
+    build: .
+    command:
+      - python
+      - -m
+      - crypto_pipeline.account_collector
+      - --loop
+      - --sleep
+      - ${ACCOUNT_COLLECTOR_SLEEP_SECONDS:-60}
+    environment:
+      DATABASE_URL: sqlite:///data/crypto_pipeline.db
+      ACCOUNT_API_BASE_URL: ${ACCOUNT_API_BASE_URL:-https://api.bithumb.com}
+      ACCOUNT_ACCESS_VALUE: ${ACCOUNT_ACCESS_VALUE:-}
+      ACCOUNT_SIGNING_VALUE: ${ACCOUNT_SIGNING_VALUE:-}
+      HTTP_TIMEOUT_SECONDS: ${HTTP_TIMEOUT_SECONDS:-10}
+    volumes:
+      - ./data:/app/data
+    profiles: ["private-account"]
+    restart: unless-stopped
+
+  quality-pipeline:
+    build: .
+    command:
+      - python
+      - -m
+      - crypto_pipeline.main
+      - --symbol
+      - ${QUALITY_SYMBOL:-BTC}
+      - --interval
+      - ${QUALITY_INTERVAL:-1m}
+    environment:
+      DATABASE_URL: sqlite:///data/crypto_pipeline.db
+    volumes:
+      - ./data:/app/data
+    profiles: ["quality"]
