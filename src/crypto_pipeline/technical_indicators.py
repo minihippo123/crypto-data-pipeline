@@ -49,7 +49,7 @@ def calculate_indicators(rows: list[dict]) -> tuple[datetime, dict] | None:
     delta = frame["close"].diff()
     gain = delta.where(delta > 0, 0).rolling(14).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
-    rs = gain / loss.replace(0, np.nan)
+    rs = gain / loss
     frame["rsi_14"] = 100 - 100 / (1 + rs)
 
     ema_12 = frame["close"].ewm(span=12, adjust=False).mean()
@@ -71,11 +71,11 @@ def calculate_indicators(rows: list[dict]) -> tuple[datetime, dict] | None:
     direction = typical_price.diff()
     positive = money_flow.where(direction > 0, 0).rolling(14).sum()
     negative = money_flow.where(direction < 0, 0).rolling(14).sum()
-    frame["mfi_14"] = 100 - 100 / (1 + positive / negative.replace(0, np.nan))
+    frame["mfi_14"] = 100 - 100 / (1 + positive / negative)
 
     frame["roc_10"] = frame["close"].pct_change(10) * 100
     frame["volume_change_pct"] = frame["volume"].pct_change() * 100
-    frame["vwap_value"] = (frame["close"] * frame["volume"]).cumsum() / frame["volume"].cumsum().replace(0, np.nan)
+    frame["vwap_value"] = (frame["close"] * frame["volume"]).cumsum() / frame["volume"].cumsum()
     frame["momentum_10"] = (frame["close"] - frame["close"].shift(10)) / frame["close"].shift(10) * 100
 
     frame["vol_ratio_5"] = (frame["volume"] / frame["volume_ma_5"].replace(0, np.nan)).fillna(1.0)
@@ -128,7 +128,7 @@ def calculate_indicators(rows: list[dict]) -> tuple[datetime, dict] | None:
     atr = true_range.rolling(14).mean()
     plus_di = 100 * pd.Series(plus_dm).rolling(14).mean() / atr
     minus_di = 100 * pd.Series(minus_dm).rolling(14).mean() / atr
-    dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan)
+    dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di)
     frame["adx_value"] = dx.rolling(14).mean()
 
     obv_change = np.where(delta > 0, frame["volume"], np.where(delta < 0, -frame["volume"], 0))
@@ -151,7 +151,13 @@ def calculate_indicators(rows: list[dict]) -> tuple[datetime, dict] | None:
         "rsi_divergence", "macd_divergence",
     ]
     indicators = {
-        field: (int(latest[field]) if field in {"rvol_spike", "rsi_divergence", "macd_divergence"} else float(latest[field]) if pd.notna(latest[field]) else 0.0)
+        field: (
+            int(latest[field])
+            if field in {"rvol_spike", "rsi_divergence", "macd_divergence"}
+            else float(latest[field])
+            if pd.notna(latest[field])
+            else 0.0
+        )
         for field in fields
     }
     timestamp = pd.to_datetime(latest["timestamp"]).to_pydatetime().replace(tzinfo=None)
