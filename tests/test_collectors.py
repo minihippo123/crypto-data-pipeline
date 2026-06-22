@@ -14,6 +14,7 @@ def test_binance_10m_aggregation() -> None:
             "low": 99.0,
             "close": 102.0,
             "volume": 1.0,
+            "trade_amount": 102.0,
         },
         {
             "timestamp": start + timedelta(minutes=5),
@@ -22,6 +23,7 @@ def test_binance_10m_aggregation() -> None:
             "low": 101.0,
             "close": 104.0,
             "volume": 2.0,
+            "trade_amount": 208.0,
         },
     ]
 
@@ -35,14 +37,12 @@ def test_binance_10m_aggregation() -> None:
             "low": 99.0,
             "close": 104.0,
             "volume": 3.0,
+            "trade_amount": 310.0,
         }
     ]
 
 
-def test_account_authorization_changes_per_request(monkeypatch) -> None:
-    monkeypatch.setenv("ACCOUNT_ACCESS_VALUE", "public-id")
-    monkeypatch.setenv("ACCOUNT_SIGNING_VALUE", "runtime-only-value")
-
+def test_account_authorization_changes_per_request() -> None:
     collector = object.__new__(AccountCollector)
     collector.access_value = "public-id"
     collector.signing_value = "runtime-only-value"
