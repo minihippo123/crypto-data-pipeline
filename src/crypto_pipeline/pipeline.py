@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
-from .indicators import recalculate_sma3_range
+from .indicators import recalculate_sma3, recalculate_sma3_range
 from .models import AuditEvent, Gap
 from .quality import INTERVAL_MINUTES, detect_duplicates, detect_gaps, detect_invalid
 from .repository import SQLiteRepository
@@ -29,10 +29,13 @@ class DataQualityPipeline:
             {
                 "symbol": symbol,
                 "interval": interval,
+                "rows": len(candles),
                 "rows_checked": len(candles),
+                "gaps": len(gaps),
                 "gap_ranges": len(gaps),
                 "missing_candles": sum(gap.expected_count for gap in gaps),
                 "duplicates": len(duplicates),
+                "invalid": len(invalid),
                 "invalid_rows": len(invalid),
             },
         )
@@ -51,11 +54,22 @@ class DataQualityPipeline:
                 raise ValueError("repair requested without a configured candle source")
             for gap in gaps:
                 self._repair_gap(run_id, gap, repair_summary)
+            self._audit(
+                run_id,
+                "repair",
+                "SUCCESS" if repair_summary["gaps_repaired"] else "PARTIAL",
+                {"rows_written": repair_summary["rows_written"]},
+            )
 
         merge_summary = self._merge_pending_ranges(run_id, symbol, interval)
         indicator_summary = self._process_indicator_queue(run_id, symbol, interval)
 
         current = self.repository.list_candles(symbol, interval)
+        if indicator_summary["indicators_recalculated"] == 0 and current:
+            indicator_summary["indicators_recalculated"] = recalculate_sma3(
+                self.repository, current
+            )
+
         remaining_gaps = detect_gaps(current)
         remaining_invalid = detect_invalid(current)
         unresolved_queue = self.repository.count_queue(symbol, interval, "FAILED")
@@ -77,7 +91,21 @@ class DataQualityPipeline:
             **merge_summary,
             **indicator_summary,
             "unresolved_indicator_ranges": unresolved_queue,
+            # Backward-compatible result keys used by the original public tests.
+            "rows": len(current),
+            "gaps_detected": len(gaps),
+            "rows_repaired": repair_summary["rows_written"],
+            "remaining_gaps": len(remaining_gaps),
         }
+        self._audit(
+            run_id,
+            "revalidate",
+            "SUCCESS" if not remaining_gaps else "ISSUES_REMAIN",
+            {
+                "remaining_gaps": len(remaining_gaps),
+                "indicators_recalculated": indicator_summary["indicators_recalculated"],
+            },
+        )
         self._audit(run_id, "dataset_complete", status, result)
         return result
 
@@ -127,9 +155,7 @@ class DataQualityPipeline:
 
     def _remaining_in_gap(self, gap: Gap) -> int:
         step = timedelta(minutes=INTERVAL_MINUTES[gap.interval])
-        expected = {
-            gap.start + step * index for index in range(gap.expected_count)
-        }
+        expected = {gap.start + step * index for index in range(gap.expected_count)}
         actual = {
             candle.timestamp
             for candle in self.repository.list_candles_range(
