@@ -19,7 +19,8 @@ class DemoSource:
 
     def fetch_range(self, symbol, interval, start, end):
         return [
-            row for row in self.rows
+            row
+            for row in self.rows
             if row.symbol == symbol and row.interval == interval and start <= row.timestamp <= end
         ]
 
@@ -63,6 +64,7 @@ def main() -> None:
     try:
         if args.demo:
             repository.connection.execute("DELETE FROM audit_events")
+            repository.connection.execute("DELETE FROM indicator_recalc_queue")
             repository.connection.execute("DELETE FROM indicators")
             repository.connection.execute("DELETE FROM candles")
             repository.connection.commit()

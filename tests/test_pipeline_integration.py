@@ -39,15 +39,19 @@ def test_end_to_end_gap_repair_and_revalidation(tmp_path):
 
     result = DataQualityPipeline(repository, Source(missing)).run("DEMO", "1m", repair=True)
 
-    assert result == {
-        "rows": 10,
-        "gaps_detected": 1,
-        "rows_repaired": 2,
-        "remaining_gaps": 0,
-        "indicators_recalculated": 10,
-    }
+    assert result["status"] == "SUCCESS"
+    assert result["rows"] == 10
+    assert result["gaps_detected"] == 1
+    assert result["rows_repaired"] == 2
+    assert result["remaining_gaps"] == 0
+    assert result["gaps_repaired"] == 1
+    assert result["indicator_ranges_queued"] == 1
+    assert result["indicator_ranges_completed"] == 1
+    assert result["indicators_recalculated"] == 2
+    assert result["unresolved_indicator_ranges"] == 0
+
     audit_count = repository.connection.execute("SELECT COUNT(*) FROM audit_events").fetchone()[0]
     indicator_count = repository.connection.execute("SELECT COUNT(*) FROM indicators").fetchone()[0]
-    assert audit_count == 3
-    assert indicator_count == 10
+    assert audit_count == 7
+    assert indicator_count == 2
     repository.close()

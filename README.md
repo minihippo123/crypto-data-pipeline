@@ -1,78 +1,99 @@
 # Crypto Data Pipeline
 
-A sanitized, executable portfolio version of a cryptocurrency collection and data-quality system operated in a private environment.
+An executable portfolio project for collecting cryptocurrency market data, validating its integrity, repairing source-backed gaps, and rebuilding dependent technical indicators.
 
-The public repository removes credentials and infrastructure identifiers while preserving the collectors' operational behavior.
+The repository is intentionally sanitized. It contains no credentials, private infrastructure identifiers, production database names, account balances, trading strategies, or personal information.
 
-## Architecture
+## What this project demonstrates
 
-```text
-Bithumb public APIs ─┐
-                     ├─> collectors ─> per-symbol tables ─> indicators
-Binance public APIs ─┘                         │
-                                              ├─> duplicate prevention
-Private account API ─> account collector ─────┤
-                                              └─> collector event log
+- resilient public-market data collection
+- interval-aware candle scheduling and storage
+- duplicate prevention and idempotent upserts
+- OHLCV validity checks
+- missing-candle detection across large time ranges
+- source-backed gap repair with revalidation
+- durable indicator-recalculation queues
+- overlapping-range merge before batch recalculation
+- technical-indicator rebuild with warm-up windows
+- persistent audit evidence for every quality-control stage
+- Docker-based local execution and automated tests
 
-Collected candles ─> validate ─> detect gaps ─> repair ─> recalculate ─> audit
-```
-
-## Collectors
-
-### Bithumb collector
-
-The public Bithumb collector preserves the production collector's main behavior:
-
-- multiple symbols in one process
-- `1m`, `3m`, `5m`, `10m`, `15m`, and `30m` candle scheduling
-- resilient candle client with retry and rate-limit handling
-- candle upsert by timestamp and interval
-- trade collection, batch VWAP, and duplicate prevention
-- orderbook snapshots and derived orderbook indicators
-- fixed 61-row depth ladder: 30 bids, midpoint, and 30 asks
-- latest per-symbol orderbook status
-- technical-indicator calculation and interval-specific storage
-- heartbeat events and continuous collection loop
-
-### Binance collector
-
-The Binance collector preserves the corresponding operational flow:
-
-- multiple symbols
-- trades, candles, and orderbook collection
-- per-symbol timestamp deduplication
-- retry and HTTP 429 handling
-- 10-minute candle generation from two native 5-minute candles
-- per-symbol candle, trade, orderbook, depth, and indicator storage
-- heartbeat and continuous execution
-
-### Account collector
-
-The account collector:
-
-- creates a new nonce and timestamp for every request
-- signs a new JWT for every account API call
-- retrieves available and locked balances
-- fetches public prices for non-cash assets
-- calculates total account valuation
-- stores timestamped balance snapshots
-- runs at a configurable collection interval with heartbeat and error logging
-
-No access value, signing value, password, token, or authorization header is committed.
-
-## Supported intervals
+## Pipeline
 
 ```text
-1m, 3m, 5m, 10m, 15m, 30m
+Public exchange APIs
+        │
+        ▼
+Collectors ──> Raw market tables ──> Technical indicators
+        │               │                     │
+        │               ▼                     │
+        └────────> Data-quality scan           │
+                        │                     │
+                        ├─ completeness        │
+                        ├─ uniqueness          │
+                        ├─ validity            │
+                        ▼                     │
+                  Source-backed repair         │
+                        │                     │
+                        ▼                     │
+              Indicator impact-range queue ───┘
+                        │
+                        ▼
+              Merge overlapping ranges
+                        │
+                        ▼
+              Batch indicator recalculation
+                        │
+                        ▼
+                 Revalidation + audit
 ```
 
-`1h` is intentionally unsupported.
+## Data-quality lifecycle
+
+```text
+Collect
+  -> Validate
+  -> Detect
+  -> Repair
+  -> Queue dependent work
+  -> Merge impact ranges
+  -> Recalculate indicators
+  -> Revalidate
+  -> Persist audit evidence
+```
+
+The repair process is conservative:
+
+- only candles returned for the exact requested timestamp range are accepted
+- unrelated API rows are discarded
+- partially repaired ranges remain unresolved
+- only fully revalidated candle ranges are queued for indicator recalculation
+- failed indicator ranges remain visible for retry and investigation
+
+## Supported market data
+
+### Bithumb
+
+- candles: `1m`, `3m`, `5m`, `10m`, `15m`, `30m`
+- trades
+- order-book snapshots
+- derived order-book metrics
+- technical indicators
+
+### Binance
+
+- candles
+- trades
+- order-book snapshots
+- derived depth data
+- technical indicators
+- 10-minute candle aggregation from native 5-minute candles
+
+The public project uses configurable symbol lists and public endpoints only.
 
 ## Storage model
 
-The public version uses SQLite so that reviewers can run it without access to a private database server.
-
-For each exchange and symbol, the collector creates tables equivalent to the private collector's operational effects:
+The portfolio version uses SQLite for reproducibility. Tables are separated by exchange, symbol, and interval to preserve the operational behavior of a larger relational deployment.
 
 ```text
 {exchange}_{symbol}_candles
@@ -80,15 +101,24 @@ For each exchange and symbol, the collector creates tables equivalent to the pri
 {exchange}_{symbol}_orderbooks
 {exchange}_{symbol}_orderbook_levels
 {exchange}_{symbol}_{interval}_indicators
+
+collector_events
+audit_events
+indicator_recalc_queue
 ```
 
-Shared tables:
+## Indicator recalculation queue
+
+A repaired candle can affect indicators beyond the repaired timestamp because rolling calculations depend on prior observations.
+
+The queue stores an affected range and processes it with a warm-up window.
 
 ```text
-symbol_orderbook_status
-account_snapshots
-collector_events
+PENDING -> RUNNING -> SUCCESS
+                   └-> FAILED
 ```
+
+Before processing, overlapping or adjacent ranges are merged. This avoids recalculating the same rows repeatedly when many nearby candle gaps are repaired.
 
 ## Run locally
 
@@ -98,7 +128,7 @@ python -m pip install -e '.[dev]'
 pytest -q
 ```
 
-Run one complete public collection cycle:
+Run one public collection cycle:
 
 ```bash
 bithumb-collector --once
@@ -112,72 +142,64 @@ bithumb-collector
 binance-collector
 ```
 
-Run the account collector after providing private runtime values only in the local environment:
+Run a local data-quality demonstration with synthetic data:
 
 ```bash
-account-collector --once
+crypto-pipeline --demo --repair
 ```
 
 ## Run with Docker
 
-Run both public market collectors continuously:
+Start the public collectors:
 
 ```bash
 docker compose up --build bithumb-collector binance-collector
 ```
 
-Run the private account collector only when its local environment values are configured:
-
-```bash
-docker compose --profile private-account up --build account-collector
-```
-
-Run the data-quality component:
+Run the quality pipeline:
 
 ```bash
 docker compose --profile quality run --rm quality-pipeline
 ```
 
-## Data-quality controls
+## Quality controls
 
-```text
-Collect -> Validate -> Detect -> Repair -> Recalculate -> Revalidate -> Audit
-```
-
-Implemented controls include:
-
-- completeness: missing candle timestamp detection
-- uniqueness: database keys and trade duplicate prevention
-- validity: OHLCV relationship checks
-- controlled repair: source-backed candle restoration
-- dependent processing: technical-indicator recalculation
-- evidence: persistent collector and audit events
+| Control | Purpose | Evidence |
+|---|---|---|
+| Completeness | Detect missing interval timestamps | gap findings and remaining-missing counts |
+| Uniqueness | Prevent duplicate candles and trades | primary keys, deduplication, conflict counts |
+| Validity | Check OHLCV relationships and values | invalid-row findings |
+| Repair authorization | Restore only exact source-backed rows | requested range and accepted rows |
+| Dependency control | Recalculate indicators after candle changes | durable queue and warm-up range |
+| Revalidation | Confirm the issue was actually resolved | remaining-gap and status fields |
+| Auditability | Preserve run and stage outcomes | persistent audit records |
 
 ## Tests
 
-The tests verify:
+The automated test suite covers:
 
 - interval scheduling through 30 minutes
+- candle upsert idempotency
+- duplicate-trade prevention
+- order-book depth storage
 - Binance 10-minute aggregation
-- account authorization refresh for each request
-- candle upsert behavior
-- duplicate trade prevention
-- fixed 61-row orderbook depth storage
-- orderbook status upsert
-- interval-specific indicator table creation
-- full technical-indicator calculation after warm-up
-- end-to-end data-quality repair and revalidation
+- technical-indicator calculation after warm-up
+- missing-candle detection
+- source-backed repair
+- partial and unrecoverable repair outcomes
+- indicator queue creation and range merging
+- recalculation and revalidation
 
-## Security and privacy
+## Repository boundaries
 
-This repository intentionally excludes:
+This repository is a standalone public implementation designed for review and reproduction. It does not include or connect to any private deployment.
 
-- database usernames and passwords
-- API access and signing values
-- tokens and authorization headers
-- private IP addresses and hostnames
-- NAS paths and private deployment details
-- private database names
+Excluded by design:
+
+- real access values or signing values
+- private infrastructure and machine-specific paths
+- private database identifiers
+- production datasets or account activity
 - personal identifiers
 
-All sensitive runtime values must be injected locally through environment variables and must never be committed.
+See [docs/architecture.md](docs/architecture.md) and [docs/data-quality.md](docs/data-quality.md) for the design details.
