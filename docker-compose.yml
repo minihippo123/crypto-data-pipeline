@@ -65,8 +65,8 @@ services:
       - python
       - -m
       - crypto_pipeline.main
-      - --symbol
-      - ${QUALITY_SYMBOL:-BTC}
+      - --demo
+      - --repair
       - --interval
       - ${QUALITY_INTERVAL:-1m}
     environment:
