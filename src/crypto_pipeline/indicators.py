@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 
+from .models import Candle
 from .repository import SQLiteRepository
 
 
@@ -13,6 +14,16 @@ class IndicatorRepairResult:
     inserted_rows: int
     updated_rows: int
     warmup_rows: int
+
+
+def recalculate_sma3(repository: SQLiteRepository, candles: list[Candle]) -> int:
+    """Backward-compatible full-dataset recalculation used by existing callers."""
+    closes: list[Decimal] = []
+    for candle in candles:
+        closes.append(candle.close)
+        value = sum(closes[-3:]) / Decimal(3) if len(closes) >= 3 else None
+        repository.upsert_sma3(candle, value)
+    return len(candles)
 
 
 def recalculate_sma3_range(
