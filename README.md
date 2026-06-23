@@ -103,8 +103,7 @@ The portfolio version uses SQLite for reproducibility. Tables are separated by e
 {exchange}_{symbol}_{interval}_indicators
 
 collector_events
-data_quality_runs
-data_quality_findings
+audit_events
 indicator_recalc_queue
 ```
 
@@ -112,7 +111,7 @@ indicator_recalc_queue
 
 A repaired candle can affect indicators beyond the repaired timestamp because rolling calculations depend on prior observations.
 
-The queue therefore stores an impact range and processes it with a warm-up window.
+The queue stores an affected range and processes it with a warm-up window.
 
 ```text
 PENDING -> RUNNING -> SUCCESS
@@ -170,7 +169,7 @@ docker compose --profile quality run --rm quality-pipeline
 | Completeness | Detect missing interval timestamps | gap findings and remaining-missing counts |
 | Uniqueness | Prevent duplicate candles and trades | primary keys, deduplication, conflict counts |
 | Validity | Check OHLCV relationships and values | invalid-row findings |
-| Repair authorization | Restore only exact source-backed rows | fetch status, requested range, inserted rows |
+| Repair authorization | Restore only exact source-backed rows | requested range and accepted rows |
 | Dependency control | Recalculate indicators after candle changes | durable queue and warm-up range |
 | Revalidation | Confirm the issue was actually resolved | remaining-gap and status fields |
 | Auditability | Preserve run and stage outcomes | persistent audit records |
@@ -197,11 +196,10 @@ This repository is a standalone public implementation designed for review and re
 
 Excluded by design:
 
-- real API access or signing values
-- passwords, tokens, authorization headers, and webhook URLs
-- private IP addresses, hostnames, ports, and NAS paths
-- private database names or user accounts
-- production datasets, balances, orders, positions, or strategy parameters
-- personal names, email addresses, chat identifiers, and device information
+- real access values or signing values
+- private infrastructure and machine-specific paths
+- private database identifiers
+- production datasets or account activity
+- personal identifiers
 
-See [SECURITY.md](SECURITY.md) and [docs/data-quality.md](docs/data-quality.md) for the design and disclosure rules.
+See [docs/architecture.md](docs/architecture.md) and [docs/data-quality.md](docs/data-quality.md) for the design details.
