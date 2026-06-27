@@ -5,9 +5,12 @@ x-common-environment: &common-environment
 x-common-volumes: &common-volumes
   - ${NAS_DATA_DIR:-./data}:/app/data
 
+x-common-user: &common-user ${PUID:-1000}:${PGID:-1000}
+
 services:
   bithumb-collector:
     build: .
+    user: *common-user
     command: ["python", "-m", "crypto_pipeline.bithumb_collector"]
     environment:
       <<: *common-environment
@@ -29,6 +32,7 @@ services:
 
   binance-collector:
     build: .
+    user: *common-user
     command: ["python", "-m", "crypto_pipeline.binance_collector"]
     environment:
       <<: *common-environment
@@ -48,6 +52,7 @@ services:
 
   account-collector:
     build: .
+    user: *common-user
     command: ["python", "-m", "crypto_pipeline.account_collector"]
     environment:
       <<: *common-environment
@@ -62,6 +67,7 @@ services:
 
   quality-pipeline:
     build: .
+    user: *common-user
     command:
       - /bin/sh
       - -ec
@@ -82,6 +88,7 @@ services:
 
   quality-demo:
     build: .
+    user: *common-user
     command:
       - python
       - -m
