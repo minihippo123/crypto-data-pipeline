@@ -27,3 +27,14 @@ jobs:
           path: pytest-output.txt
           if-no-files-found: error
       - run: python -m compileall -q src
+      - name: Prepare Compose environment
+        run: |
+          cp .env.example .env
+          printf '\nPUID=%s\nPGID=%s\n' "$(id -u)" "$(id -g)" >> .env
+          mkdir -p data
+      - name: Validate Compose configuration
+        run: docker compose config --quiet
+      - name: Build quality image
+        run: docker compose --profile demo build quality-demo
+      - name: Run quality demo container
+        run: docker compose --profile demo run --rm quality-demo

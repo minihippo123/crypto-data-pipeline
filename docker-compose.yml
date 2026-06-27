@@ -1,9 +1,19 @@
+x-common-environment: &common-environment
+  DATABASE_URL: ${DATABASE_URL:-sqlite:////app/data/crypto_pipeline.db}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+
+x-common-volumes: &common-volumes
+  - ${NAS_DATA_DIR:-./data}:/app/data
+
+x-common-user: &common-user ${PUID:-1000}:${PGID:-1000}
+
 services:
   bithumb-collector:
     build: .
+    user: *common-user
     command: ["python", "-m", "crypto_pipeline.bithumb_collector"]
     environment:
-      DATABASE_URL: sqlite:///data/crypto_pipeline.db
+      <<: *common-environment
       BITHUMB_SYMBOLS: ${BITHUMB_SYMBOLS:-BTC,ETH,XRP,SOL,SUI}
       BITHUMB_PUBLIC_API_BASE_URL: ${BITHUMB_PUBLIC_API_BASE_URL:-https://api.bithumb.com/public}
       BITHUMB_V1_API_BASE_URL: ${BITHUMB_V1_API_BASE_URL:-https://api.bithumb.com/v1}
@@ -17,16 +27,15 @@ services:
       CANDLE_WINDOW_SECONDS: ${CANDLE_WINDOW_SECONDS:-10}
       CANDLE_TASKS_PER_LOOP: ${CANDLE_TASKS_PER_LOOP:-3}
       ORDERBOOK_DEPTH_ON: ${ORDERBOOK_DEPTH_ON:-1}
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
-    volumes:
-      - ./data:/app/data
+    volumes: *common-volumes
     restart: unless-stopped
 
   binance-collector:
     build: .
+    user: *common-user
     command: ["python", "-m", "crypto_pipeline.binance_collector"]
     environment:
-      DATABASE_URL: sqlite:///data/crypto_pipeline.db
+      <<: *common-environment
       BINANCE_SYMBOLS: ${BINANCE_SYMBOLS:-BTCUSDT,ETHUSDT,XRPUSDT,SOLUSDT,SUIUSDT}
       BINANCE_BASE_URL: ${BINANCE_BASE_URL:-https://api.binance.com/api/v3}
       HTTP_TIMEOUT_SECONDS: ${HTTP_TIMEOUT_SECONDS:-10}
@@ -38,29 +47,48 @@ services:
       BINANCE_TRADES_LIMIT: ${BINANCE_TRADES_LIMIT:-1000}
       BINANCE_KLINES_LIMIT: ${BINANCE_KLINES_LIMIT:-1000}
       BINANCE_ORDERBOOK_LIMIT: ${BINANCE_ORDERBOOK_LIMIT:-100}
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
-    volumes:
-      - ./data:/app/data
+    volumes: *common-volumes
     restart: unless-stopped
 
   account-collector:
     build: .
+    user: *common-user
     command: ["python", "-m", "crypto_pipeline.account_collector"]
     environment:
-      DATABASE_URL: sqlite:///data/crypto_pipeline.db
+      <<: *common-environment
       ACCOUNT_API_BASE_URL: ${ACCOUNT_API_BASE_URL:-https://api.bithumb.com}
       ACCOUNT_ACCESS_VALUE: ${ACCOUNT_ACCESS_VALUE:-}
       ACCOUNT_SIGNING_VALUE: ${ACCOUNT_SIGNING_VALUE:-}
       ACCOUNT_COLLECT_INTERVAL_SECONDS: ${ACCOUNT_COLLECT_INTERVAL_SECONDS:-5}
       HTTP_TIMEOUT_SECONDS: ${HTTP_TIMEOUT_SECONDS:-10}
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
-    volumes:
-      - ./data:/app/data
+    volumes: *common-volumes
     profiles: ["private-account"]
     restart: unless-stopped
 
   quality-pipeline:
     build: .
+    user: *common-user
+    command:
+      - /bin/sh
+      - -ec
+      - >-
+        python -m crypto_pipeline.main
+        --symbol "$${QUALITY_SYMBOL}"
+        --interval "$${QUALITY_INTERVAL}"
+        $${QUALITY_REPAIR_ARGS}
+    environment:
+      <<: *common-environment
+      QUALITY_SYMBOL: ${QUALITY_SYMBOL:-BTC}
+      QUALITY_INTERVAL: ${QUALITY_INTERVAL:-1m}
+      QUALITY_REPAIR_ARGS: ${QUALITY_REPAIR_ARGS:-}
+      SOURCE_API_BASE_URL: ${SOURCE_API_BASE_URL:-}
+      SOURCE_API_TIMEOUT_SECONDS: ${SOURCE_API_TIMEOUT_SECONDS:-10}
+    volumes: *common-volumes
+    profiles: ["quality"]
+
+  quality-demo:
+    build: .
+    user: *common-user
     command:
       - python
       - -m
@@ -70,7 +98,6 @@ services:
       - --interval
       - ${QUALITY_INTERVAL:-1m}
     environment:
-      DATABASE_URL: sqlite:///data/crypto_pipeline.db
-    volumes:
-      - ./data:/app/data
-    profiles: ["quality"]
+      <<: *common-environment
+    volumes: *common-volumes
+    profiles: ["demo"]

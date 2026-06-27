@@ -4,6 +4,25 @@ An executable portfolio project for collecting cryptocurrency market data, valid
 
 The repository is intentionally sanitized. It contains no credentials, private infrastructure identifiers, production database names, account balances, trading strategies, or personal information.
 
+## NAS deployment
+
+See [docs/nas-deployment.md](docs/nas-deployment.md) for the Synology deployment procedure.
+
+Minimal `.env` values:
+
+```dotenv
+DATABASE_URL=sqlite:////app/data/crypto_pipeline.db
+NAS_DATA_DIR=/volume1/docker/crypto-data-pipeline/data
+```
+
+Then run:
+
+```bash
+cp .env.example .env
+docker compose config --quiet
+docker compose up -d --build bithumb-collector binance-collector
+```
+
 ## What this project demonstrates
 
 - resilient public-market data collection
