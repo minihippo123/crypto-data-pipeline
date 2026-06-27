@@ -1,103 +1,56 @@
-x-common-environment: &common-environment
-  DATABASE_URL: ${DATABASE_URL:-sqlite:////app/data/crypto_pipeline.db}
-  LOG_LEVEL: ${LOG_LEVEL:-INFO}
-
-x-common-volumes: &common-volumes
-  - ${NAS_DATA_DIR:-./data}:/app/data
-
-x-common-user: &common-user ${PUID:-1000}:${PGID:-1000}
+x-collector-common: &collector-common
+  build:
+    context: .
+  env_file:
+    - .env
+  restart: unless-stopped
+  init: true
+  working_dir: /app
+  environment:
+    PYTHONUNBUFFERED: "1"
+    TZ: ${TZ:-Asia/Seoul}
+  volumes:
+    - ./logs:/app/logs
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
 
 services:
-  bithumb-collector:
-    build: .
-    user: *common-user
-    command: ["python", "-m", "crypto_pipeline.bithumb_collector"]
-    environment:
-      <<: *common-environment
-      BITHUMB_SYMBOLS: ${BITHUMB_SYMBOLS:-BTC,ETH,XRP,SOL,SUI}
-      BITHUMB_PUBLIC_API_BASE_URL: ${BITHUMB_PUBLIC_API_BASE_URL:-https://api.bithumb.com/public}
-      BITHUMB_V1_API_BASE_URL: ${BITHUMB_V1_API_BASE_URL:-https://api.bithumb.com/v1}
-      BITHUMB_PUBLIC_TIMEOUT_SECONDS: ${BITHUMB_PUBLIC_TIMEOUT_SECONDS:-5}
-      BITHUMB_CANDLE_TIMEOUT_SECONDS: ${BITHUMB_CANDLE_TIMEOUT_SECONDS:-10}
-      BITHUMB_CANDLE_MAX_RETRIES: ${BITHUMB_CANDLE_MAX_RETRIES:-3}
-      BITHUMB_CANDLE_RETRY_DELAY_SECONDS: ${BITHUMB_CANDLE_RETRY_DELAY_SECONDS:-1}
-      BITHUMB_LOOP_SLEEP_SECONDS: ${BITHUMB_LOOP_SLEEP_SECONDS:-0.2}
-      BITHUMB_ERROR_SLEEP_SECONDS: ${BITHUMB_ERROR_SLEEP_SECONDS:-5}
-      CANDLE_START_SECOND: ${CANDLE_START_SECOND:-0}
-      CANDLE_WINDOW_SECONDS: ${CANDLE_WINDOW_SECONDS:-10}
-      CANDLE_TASKS_PER_LOOP: ${CANDLE_TASKS_PER_LOOP:-3}
-      ORDERBOOK_DEPTH_ON: ${ORDERBOOK_DEPTH_ON:-1}
-    volumes: *common-volumes
-    restart: unless-stopped
+  account-collector:
+    <<: *collector-common
+    command: ["python", "account_collector.py"]
+    mem_limit: 256m
 
   binance-collector:
-    build: .
-    user: *common-user
-    command: ["python", "-m", "crypto_pipeline.binance_collector"]
-    environment:
-      <<: *common-environment
-      BINANCE_SYMBOLS: ${BINANCE_SYMBOLS:-BTCUSDT,ETHUSDT,XRPUSDT,SOLUSDT,SUIUSDT}
-      BINANCE_BASE_URL: ${BINANCE_BASE_URL:-https://api.binance.com/api/v3}
-      HTTP_TIMEOUT_SECONDS: ${HTTP_TIMEOUT_SECONDS:-10}
-      HTTP_MAX_RETRIES: ${HTTP_MAX_RETRIES:-3}
-      HTTP_RETRY_DELAY_SECONDS: ${HTTP_RETRY_DELAY_SECONDS:-1}
-      BINANCE_UPDATE_INTERVAL_SECONDS: ${BINANCE_UPDATE_INTERVAL_SECONDS:-0.1}
-      BINANCE_API_CALL_SLEEP_SECONDS: ${BINANCE_API_CALL_SLEEP_SECONDS:-0.1}
-      BINANCE_SYMBOL_SLEEP_SECONDS: ${BINANCE_SYMBOL_SLEEP_SECONDS:-0.5}
-      BINANCE_TRADES_LIMIT: ${BINANCE_TRADES_LIMIT:-1000}
-      BINANCE_KLINES_LIMIT: ${BINANCE_KLINES_LIMIT:-1000}
-      BINANCE_ORDERBOOK_LIMIT: ${BINANCE_ORDERBOOK_LIMIT:-100}
-    volumes: *common-volumes
-    restart: unless-stopped
+    <<: *collector-common
+    command: ["python", "binance.py"]
+    mem_limit: 384m
 
-  account-collector:
-    build: .
-    user: *common-user
-    command: ["python", "-m", "crypto_pipeline.account_collector"]
-    environment:
-      <<: *common-environment
-      ACCOUNT_API_BASE_URL: ${ACCOUNT_API_BASE_URL:-https://api.bithumb.com}
-      ACCOUNT_ACCESS_VALUE: ${ACCOUNT_ACCESS_VALUE:-}
-      ACCOUNT_SIGNING_VALUE: ${ACCOUNT_SIGNING_VALUE:-}
-      ACCOUNT_COLLECT_INTERVAL_SECONDS: ${ACCOUNT_COLLECT_INTERVAL_SECONDS:-5}
-      HTTP_TIMEOUT_SECONDS: ${HTTP_TIMEOUT_SECONDS:-10}
-    volumes: *common-volumes
-    profiles: ["private-account"]
-    restart: unless-stopped
+  bithumb-collector:
+    <<: *collector-common
+    command: ["python", "bithumb_collector.py"]
+    mem_limit: 512m
 
-  quality-pipeline:
-    build: .
-    user: *common-user
-    command:
-      - /bin/sh
-      - -ec
-      - >-
-        python -m crypto_pipeline.main
-        --symbol "$${QUALITY_SYMBOL}"
-        --interval "$${QUALITY_INTERVAL}"
-        $${QUALITY_REPAIR_ARGS}
+  data-quality-manager:
+    build:
+      context: .
+      dockerfile: Dockerfile.data-quality
+    env_file:
+      - .env
+    restart: "no"
+    init: true
+    working_dir: /app
+    command: ["python", "-m", "data_quality.main", "--mode", "auto"]
     environment:
-      <<: *common-environment
-      QUALITY_SYMBOL: ${QUALITY_SYMBOL:-BTC}
-      QUALITY_INTERVAL: ${QUALITY_INTERVAL:-1m}
-      QUALITY_REPAIR_ARGS: ${QUALITY_REPAIR_ARGS:-}
-      SOURCE_API_BASE_URL: ${SOURCE_API_BASE_URL:-}
-      SOURCE_API_TIMEOUT_SECONDS: ${SOURCE_API_TIMEOUT_SECONDS:-10}
-    volumes: *common-volumes
-    profiles: ["quality"]
-
-  quality-demo:
-    build: .
-    user: *common-user
-    command:
-      - python
-      - -m
-      - crypto_pipeline.main
-      - --demo
-      - --repair
-      - --interval
-      - ${QUALITY_INTERVAL:-1m}
-    environment:
-      <<: *common-environment
-    volumes: *common-volumes
-    profiles: ["demo"]
+      PYTHONUNBUFFERED: "1"
+      TZ: ${TZ:-Asia/Seoul}
+    volumes:
+      - ./logs:/app/logs
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    mem_limit: 8g
