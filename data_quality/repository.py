@@ -73,19 +73,21 @@ class DataQualityRepository:
         actual_value=None,
         affected_rows: int = 0,
         details: dict | None = None,
+        failure_reason: str | None = None,
     ) -> None:
         self.db.execute(
             """
             INSERT INTO dq_check_results
-              (run_id,dataset_id,check_type,status,range_start,range_end,
+              (run_id,dataset_id,check_type,status,failure_reason,range_start,range_end,
                expected_value,actual_value,affected_rows,details_json)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             """,
             (
                 run_id,
                 dataset_id,
                 check_type,
                 status,
+                failure_reason,
                 range_start,
                 range_end,
                 expected_value,
@@ -106,6 +108,16 @@ class DataQualityRepository:
         )
         row = self.db.fetchone("SELECT LAST_INSERT_ID() AS id")
         return int(row["id"])
+
+    def mark_indicator_queue_failed(self, queue_id: int, reason: str, error_message: str) -> None:
+        self.db.execute(
+            """
+            UPDATE dq_indicator_recalc_queue
+            SET status='FAILED', failure_reason=%s, error_message=%s, completed_at=%s, attempts=attempts+1
+            WHERE id=%s
+            """,
+            (reason, error_message, datetime.now(), queue_id),
+        )
 
     def list_indicator_queue(
         self,
@@ -136,6 +148,71 @@ class DataQualityRepository:
             )
             for row in rows
         ]
+
+    def failure_reason_summary(self, run_id: str, limit: int = 10) -> list[dict]:
+        return self.db.fetchall(
+            """
+            SELECT COALESCE(failure_reason, 'UNCLASSIFIED') AS failure_reason,
+                   COUNT(*) AS count,
+                   COALESCE(SUM(affected_rows), 0) AS affected_rows
+            FROM dq_check_results
+            WHERE run_id=%s AND status <> 'SUCCESS'
+            GROUP BY COALESCE(failure_reason, 'UNCLASSIFIED')
+            ORDER BY affected_rows DESC, count DESC
+            LIMIT %s
+            """,
+            (run_id, int(limit)),
+        )
+
+    def dataset_issue_summary(self, run_id: str, limit: int = 10) -> list[dict]:
+        return self.db.fetchall(
+            """
+            SELECT d.source, d.symbol, d.`interval`, r.check_type, r.status,
+                   COALESCE(r.failure_reason, 'UNCLASSIFIED') AS failure_reason,
+                   COUNT(*) AS count,
+                   COALESCE(SUM(r.affected_rows), 0) AS affected_rows
+            FROM dq_check_results r
+            JOIN dq_dataset_registry d ON r.dataset_id=d.id
+            WHERE r.run_id=%s AND r.status <> 'SUCCESS'
+            GROUP BY d.source, d.symbol, d.`interval`, r.check_type, r.status,
+                     COALESCE(r.failure_reason, 'UNCLASSIFIED')
+            ORDER BY affected_rows DESC, count DESC
+            LIMIT %s
+            """,
+            (run_id, int(limit)),
+        )
+
+    def failure_samples(self, run_id: str, limit: int = 5) -> list[dict]:
+        return self.db.fetchall(
+            """
+            SELECT d.source, d.symbol, d.`interval`, r.check_type, r.status,
+                   r.failure_reason, r.range_start, r.range_end, r.affected_rows,
+                   r.details_json
+            FROM dq_check_results r
+            JOIN dq_dataset_registry d ON r.dataset_id=d.id
+            WHERE r.run_id=%s AND r.status <> 'SUCCESS'
+            ORDER BY r.affected_rows DESC, r.id ASC
+            LIMIT %s
+            """,
+            (run_id, int(limit)),
+        )
+
+    def indicator_queue_summary(self, run_id: str, limit: int = 10) -> list[dict]:
+        return self.db.fetchall(
+            """
+            SELECT d.source, d.symbol, d.`interval`, q.status,
+                   COALESCE(q.failure_reason, 'UNCLASSIFIED') AS failure_reason,
+                   COUNT(*) AS count
+            FROM dq_indicator_recalc_queue q
+            JOIN dq_dataset_registry d ON q.dataset_id=d.id
+            WHERE q.run_id=%s
+            GROUP BY d.source, d.symbol, d.`interval`, q.status,
+                     COALESCE(q.failure_reason, 'UNCLASSIFIED')
+            ORDER BY count DESC
+            LIMIT %s
+            """,
+            (run_id, int(limit)),
+        )
 
     def finish_run(self, run_id: str, finished_at: datetime, status: str, stats: RunStats) -> None:
         self.db.execute(
