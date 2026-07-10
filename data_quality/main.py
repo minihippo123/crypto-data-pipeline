@@ -78,13 +78,34 @@ def _indicator_table_status(db: Database, table: str) -> tuple[str, str | None]:
 
 def _critical_thresholds() -> dict[str, int]:
     return {
-        "gaps": int(os.getenv("DQ_ALERT_GAP_RANGES", "1000")),
-        "invalid_rows": int(os.getenv("DQ_ALERT_INVALID_ROWS", "100")),
-        "unresolved_errors": int(os.getenv("DQ_ALERT_UNRESOLVED_ERRORS", "10000")),
+        "gaps": int(os.getenv("DQ_ALERT_GAP_RANGES", "1")),
+        "invalid_rows": int(os.getenv("DQ_ALERT_INVALID_ROWS", "1")),
+        "unresolved_errors": int(os.getenv("DQ_ALERT_UNRESOLVED_ERRORS", "1")),
     }
 
 
-def analyze_dataset(db: Database, repo: DataQualityRepository, run_id: str, dataset: Dataset, start: datetime, end: datetime) -> dict:
+def _issue_payload(summary: dict, extra: dict | None = None) -> dict:
+    payload = {
+        "gap_ranges": summary.get("gap_ranges", 0),
+        "missing_candles": summary.get("missing_candles", 0),
+        "invalid_rows": summary.get("invalid_rows", 0),
+        "indicator_status": summary.get("indicator_status", "UNKNOWN"),
+    }
+    if extra:
+        payload.update(extra)
+    return payload
+
+
+def analyze_dataset(
+    db: Database,
+    repo: DataQualityRepository,
+    notifier: DataQualityNotifier,
+    run_id: str,
+    dataset: Dataset,
+    dataset_label: str,
+    start: datetime,
+    end: datetime,
+) -> dict:
     summary = {
         "gap_ranges": 0,
         "missing_candles": 0,
@@ -105,6 +126,13 @@ def analyze_dataset(db: Database, repo: DataQualityRepository, run_id: str, data
             details={"table": dataset.candle_table, "action": "run collector or create market table"},
         )
         summary["failure_reason"] = FailureReason.DB_TABLE_MISSING.value
+        notifier.issue(
+            run_id,
+            dataset_label,
+            "CANDLE_TABLE",
+            FailureReason.DB_TABLE_MISSING.value,
+            {"table": dataset.candle_table, "action": "run collector or create market table"},
+        )
         return summary
 
     rows = _fetch_candle_rows(db, dataset.candle_table, dataset.interval, start, end)
@@ -119,6 +147,12 @@ def analyze_dataset(db: Database, repo: DataQualityRepository, run_id: str, data
     summary["invalid_rows"] = invalid_rows
 
     if gaps:
+        details = {
+            "gap_ranges": len(gaps),
+            "missing_candles": summary["missing_candles"],
+            "sample": [(str(gap_start), str(gap_end)) for gap_start, gap_end in gaps[:10]],
+            "meaning": "local DB has missing interval timestamps; backfill/revalidation required",
+        }
         repo.record_check(
             run_id,
             dataset.id,
@@ -130,13 +164,18 @@ def analyze_dataset(db: Database, repo: DataQualityRepository, run_id: str, data
             actual_value=len(rows),
             affected_rows=len(gaps),
             failure_reason=FailureReason.LOCAL_CANDLE_GAP.value,
-            details={
-                "gap_ranges": len(gaps),
-                "sample": [(str(gap_start), str(gap_end)) for gap_start, gap_end in gaps[:5]],
-                "meaning": "local DB has missing interval timestamps; backfill/revalidation required",
-            },
+            details=details,
         )
         summary["failure_reason"] = FailureReason.LOCAL_CANDLE_GAP.value
+        notifier.issue(run_id, dataset_label, "CANDLE_COMPLETENESS", FailureReason.LOCAL_CANDLE_GAP.value, details)
+        for gap_start, gap_end in gaps[: int(os.getenv("DQ_ALERT_GAP_SAMPLE_LIMIT", "10"))]:
+            notifier.issue(
+                run_id,
+                dataset_label,
+                "CANDLE_GAP_SAMPLE",
+                FailureReason.LOCAL_CANDLE_GAP.value,
+                {"range_start": gap_start, "range_end": gap_end, "action": "backfill then revalidate this exact range"},
+            )
     else:
         repo.record_check(
             run_id,
@@ -151,6 +190,7 @@ def analyze_dataset(db: Database, repo: DataQualityRepository, run_id: str, data
         )
 
     if invalid_rows:
+        details = {"invalid_rows": invalid_rows, "meaning": "OHLCV rule violation or unparsable values"}
         repo.record_check(
             run_id,
             dataset.id,
@@ -160,9 +200,10 @@ def analyze_dataset(db: Database, repo: DataQualityRepository, run_id: str, data
             end,
             affected_rows=invalid_rows,
             failure_reason=FailureReason.LOCAL_INVALID_CANDLE.value,
-            details={"invalid_rows": invalid_rows, "meaning": "OHLCV rule violation or unparsable values"},
+            details=details,
         )
         summary["failure_reason"] = FailureReason.LOCAL_INVALID_CANDLE.value
+        notifier.issue(run_id, dataset_label, "CANDLE_VALIDITY", FailureReason.LOCAL_INVALID_CANDLE.value, details)
     else:
         repo.record_check(
             run_id,
@@ -178,6 +219,7 @@ def analyze_dataset(db: Database, repo: DataQualityRepository, run_id: str, data
     indicator_status, indicator_reason = _indicator_table_status(db, dataset.indicator_table)
     summary["indicator_status"] = indicator_status
     if indicator_status != "SUCCESS":
+        details = {"table": dataset.indicator_table, "meaning": "indicator recalculation cannot write/read target table"}
         repo.record_check(
             run_id,
             dataset.id,
@@ -187,10 +229,11 @@ def analyze_dataset(db: Database, repo: DataQualityRepository, run_id: str, data
             end,
             affected_rows=1,
             failure_reason=indicator_reason,
-            details={"table": dataset.indicator_table, "meaning": "indicator recalculation cannot write/read target table"},
+            details=details,
         )
         if summary["failure_reason"] is None:
             summary["failure_reason"] = indicator_reason
+        notifier.issue(run_id, dataset_label, "INDICATOR_TABLE", indicator_reason or "UNKNOWN", details)
     else:
         repo.record_check(
             run_id,
@@ -223,22 +266,22 @@ def run(mode: str) -> dict:
 
         for index, raw_dataset in enumerate(datasets, start=1):
             dataset_label = f"{raw_dataset.source} {raw_dataset.symbol} {raw_dataset.interval}"
+            notifier.dataset_started(run_id, dataset_label, index, len(datasets))
             try:
                 dataset = repo.upsert_dataset(raw_dataset)
                 stats.datasets_checked += 1
-                summary = analyze_dataset(db, repo, run_id, dataset, start, end)
+                summary = analyze_dataset(db, repo, notifier, run_id, dataset, dataset_label, start, end)
                 dataset_failed = bool(summary.get("failure_reason"))
                 if dataset_failed:
                     stats.checks_failed += 1
-                    stats.unresolved_errors += int(summary["gap_ranges"] or 0) + int(summary["invalid_rows"] or 0)
+                    stats.unresolved_errors += int(summary["gap_ranges"] or 0) + int(summary["invalid_rows"] or 0) + (1 if summary.get("indicator_status") != "SUCCESS" else 0)
                 else:
                     stats.checks_passed += 1
                 stats.gaps_detected += int(summary["gap_ranges"] or 0)
                 notifier.dataset_completed(run_id, dataset_label, "PARTIAL" if dataset_failed else "SUCCESS", summary)
-                if summary["gap_ranges"] >= thresholds["gaps"] or summary["invalid_rows"] >= thresholds["invalid_rows"]:
-                    notifier.critical(run_id, f"Dataset threshold exceeded: {dataset_label}", summary)
-                if index == 1 or index % int(os.getenv("DQ_PROGRESS_EVERY_DATASETS", "5")) == 0:
-                    notifier.progress(run_id, stats, dataset_label)
+                if summary["gap_ranges"] >= thresholds["gaps"] or summary["invalid_rows"] >= thresholds["invalid_rows"] or stats.unresolved_errors >= thresholds["unresolved_errors"]:
+                    notifier.critical(run_id, f"Dataset threshold exceeded: {dataset_label}", _issue_payload(summary, {"total_unresolved_errors": stats.unresolved_errors}))
+                notifier.progress(run_id, stats, dataset_label)
             except Exception as exc:
                 classified = classify_exception(exc)
                 stats.datasets_checked += 1
@@ -258,11 +301,19 @@ def run(mode: str) -> dict:
                         details={"error": classified.message, "operator_action": classified.operator_action},
                     )
                 finally:
+                    notifier.issue(
+                        run_id,
+                        dataset_label,
+                        "DATASET_EXCEPTION",
+                        classified.reason.value,
+                        {"error": classified.message, "action": classified.operator_action},
+                    )
                     notifier.critical(
                         run_id,
                         f"Dataset exception: {dataset_label}",
                         {"reason": classified.reason.value, "error": classified.message, "action": classified.operator_action},
                     )
+                    notifier.progress(run_id, stats, dataset_label)
 
         status = "SUCCESS" if stats.checks_failed == 0 and stats.unresolved_errors == 0 else "PARTIAL"
         repo.finish_run(run_id, datetime.now(), status, stats)
