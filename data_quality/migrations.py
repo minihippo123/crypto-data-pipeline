@@ -47,6 +47,7 @@ DDL = [
         dataset_id BIGINT UNSIGNED NOT NULL,
         check_type VARCHAR(64) NOT NULL,
         status VARCHAR(32) NOT NULL,
+        failure_reason VARCHAR(64) NULL,
         range_start DATETIME NULL,
         range_end DATETIME NULL,
         expected_value BIGINT NULL,
@@ -56,7 +57,8 @@ DDL = [
         checked_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (id),
         KEY idx_dq_check_run (run_id),
-        KEY idx_dq_check_dataset (dataset_id)
+        KEY idx_dq_check_dataset (dataset_id),
+        KEY idx_dq_check_reason (failure_reason, status)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     """,
     """
@@ -67,13 +69,15 @@ DDL = [
         affected_start DATETIME NOT NULL,
         affected_end DATETIME NOT NULL,
         status VARCHAR(32) NOT NULL DEFAULT 'PENDING',
+        failure_reason VARCHAR(64) NULL,
         attempts INT NOT NULL DEFAULT 0,
         error_message TEXT NULL,
         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         started_at DATETIME NULL,
         completed_at DATETIME NULL,
         PRIMARY KEY (id),
-        KEY idx_dq_queue_work (status, dataset_id, affected_start)
+        KEY idx_dq_queue_work (status, dataset_id, affected_start),
+        KEY idx_dq_queue_reason (failure_reason, status)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     """,
     """
@@ -84,9 +88,11 @@ DDL = [
         range_start DATETIME NOT NULL,
         range_end DATETIME NOT NULL,
         status VARCHAR(32) NOT NULL,
+        failure_reason VARCHAR(64) NULL,
         error_message TEXT NULL,
         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        PRIMARY KEY (id)
+        PRIMARY KEY (id),
+        KEY idx_dq_backfill_reason (failure_reason, status)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     """,
     """
@@ -97,9 +103,11 @@ DDL = [
         range_start DATETIME NOT NULL,
         range_end DATETIME NOT NULL,
         status VARCHAR(32) NOT NULL,
+        failure_reason VARCHAR(64) NULL,
         error_message TEXT NULL,
         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        PRIMARY KEY (id)
+        PRIMARY KEY (id),
+        KEY idx_dq_recalc_reason (failure_reason, status)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     """,
     """
@@ -114,6 +122,38 @@ DDL = [
 ]
 
 
+ADDITIVE_COLUMNS = {
+    "dq_check_results": {
+        "failure_reason": "ALTER TABLE dq_check_results ADD COLUMN failure_reason VARCHAR(64) NULL AFTER status",
+    },
+    "dq_indicator_recalc_queue": {
+        "failure_reason": "ALTER TABLE dq_indicator_recalc_queue ADD COLUMN failure_reason VARCHAR(64) NULL AFTER status",
+    },
+    "dq_backfill_jobs": {
+        "failure_reason": "ALTER TABLE dq_backfill_jobs ADD COLUMN failure_reason VARCHAR(64) NULL AFTER status",
+    },
+    "dq_recalculation_jobs": {
+        "failure_reason": "ALTER TABLE dq_recalculation_jobs ADD COLUMN failure_reason VARCHAR(64) NULL AFTER status",
+    },
+}
+
+
+def _column_exists(db: Database, table: str, column: str) -> bool:
+    row = db.fetchone(
+        """
+        SELECT COUNT(*) AS cnt
+        FROM information_schema.columns
+        WHERE table_schema=%s AND table_name=%s AND column_name=%s
+        """,
+        (__import__("os").getenv("DB_NAME"), table, column),
+    )
+    return bool(row and int(row["cnt"]) > 0)
+
+
 def apply_migrations(db: Database) -> None:
     for statement in DDL:
         db.execute(statement)
+    for table, columns in ADDITIVE_COLUMNS.items():
+        for column, statement in columns.items():
+            if db.table_exists(table) and not _column_exists(db, table, column):
+                db.execute(statement)
