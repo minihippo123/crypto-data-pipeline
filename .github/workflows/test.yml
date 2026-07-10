@@ -5,7 +5,7 @@ on:
   pull_request:
 
 jobs:
-  test:
+  unit-and-compose:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -13,28 +13,39 @@ jobs:
         with:
           python-version: "3.11"
       - run: python -m pip install --upgrade pip -q
-      - run: python -m pip install -e '.[dev]' -q
-      - name: Run pytest
-        shell: bash
-        run: |
-          set -o pipefail
-          pytest -q --tb=short 2>&1 | tee pytest-output.txt
-      - name: Upload pytest output
-        if: always()
-        uses: actions/upload-artifact@v4
+      - run: python -m pip install -r requirements.txt -q
+      - run: python -m compileall -q binance.py bithumb_collector.py bithumb data_quality notifications tools
+      - run: cp .env.example .env
+      - run: docker compose config --quiet
+      - run: docker build -t crypto-data-pipeline:test .
+
+  mariadb-integration:
+    runs-on: ubuntu-latest
+    services:
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: rootpass
+          MARIADB_DATABASE: CryptoDB
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=20
+    env:
+      DB_HOST: 127.0.0.1
+      DB_PORT: 3306
+      DB_USER: root
+      DB_PASSWORD: rootpass
+      DB_NAME: CryptoDB
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          name: pytest-output
-          path: pytest-output.txt
-          if-no-files-found: error
-      - run: python -m compileall -q src
-      - name: Prepare Compose environment
-        run: |
-          cp .env.example .env
-          printf '\nPUID=%s\nPGID=%s\n' "$(id -u)" "$(id -g)" >> .env
-          mkdir -p data
-      - name: Validate Compose configuration
-        run: docker compose config --quiet
-      - name: Build quality image
-        run: docker compose --profile demo build quality-demo
-      - name: Run quality demo container
-        run: docker compose --profile demo run --rm quality-demo
+          python-version: "3.11"
+      - run: python -m pip install --upgrade pip -q
+      - run: python -m pip install -r requirements.txt -q
+      - run: python -m compileall -q binance.py bithumb_collector.py bithumb data_quality notifications tools
+      - run: python -m tests_public.mariadb_integration
