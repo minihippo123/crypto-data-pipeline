@@ -25,6 +25,7 @@ class DataQualityNotifier:
                     f"Datasets: {dataset_count}",
                     f"Repair: {'ON' if repair_enabled else 'OFF'}",
                     f"Started at: {datetime.now().isoformat(timespec='seconds')}",
+                    "Alert mode: VERBOSE / REPORT EVERYTHING",
                 ]
             ),
         )
@@ -42,16 +43,36 @@ class DataQualityNotifier:
                     f"Gaps detected: {stats.gaps_detected}",
                     f"Rows repaired: {stats.rows_repaired}",
                     f"Indicator queued: {stats.indicator_ranges_queued}",
+                    f"Indicator completed: {stats.indicator_ranges_completed}",
+                    f"Indicator failed: {stats.indicator_ranges_failed}",
+                    f"Indicators recalculated: {stats.indicators_recalculated}",
                     f"Unresolved errors: {stats.unresolved_errors}",
                 ]
             ),
+        )
+
+    def dataset_started(self, run_id: str, dataset: str, index: int, total: int) -> None:
+        self.send(
+            "[CryptoDB Data Quality][DATASET START]",
+            "\n".join([f"Run ID: {run_id}", f"Dataset: {dataset}", f"Progress: {index}/{total}"]),
         )
 
     def dataset_completed(self, run_id: str, dataset: str, status: str, summary: dict) -> None:
         body = [f"Run ID: {run_id}", f"Dataset: {dataset}", f"Status: {status}"]
         for key, value in summary.items():
             body.append(f"{key}: {value}")
-        self.send("[CryptoDB Data Quality][DATASET]", "\n".join(body), "WARNING" if status != "SUCCESS" else "INFO")
+        self.send("[CryptoDB Data Quality][DATASET END]", "\n".join(body), "WARNING" if status != "SUCCESS" else "INFO")
+
+    def issue(self, run_id: str, dataset: str, check_type: str, reason: str, details: dict) -> None:
+        body = [
+            f"Run ID: {run_id}",
+            f"Dataset: {dataset}",
+            f"Check: {check_type}",
+            f"Reason: {reason}",
+        ]
+        for key, value in details.items():
+            body.append(f"{key}: {value}")
+        self.send("[CryptoDB Data Quality][ISSUE]", "\n".join(body), "WARNING")
 
     def critical(self, run_id: str, title: str, summary: dict) -> None:
         body = [f"Run ID: {run_id}", title]
@@ -76,13 +97,13 @@ class DataQualityNotifier:
             "원인별 요약:",
         ]
         if reason_summary:
-            for row in reason_summary[:10]:
+            for row in reason_summary[:25]:
                 lines.append(f"- {row['failure_reason']}: {row['count']}건 / affected={row['affected_rows']}")
         else:
             lines.append("- 없음")
         lines.extend(["", "Top affected datasets:"])
         if dataset_summary:
-            for row in dataset_summary[:10]:
+            for row in dataset_summary[:25]:
                 lines.append(
                     f"- {row['source']} {row['symbol']} {row['interval']} / {row['check_type']} / {row['failure_reason']} / affected={row['affected_rows']}"
                 )
@@ -90,7 +111,7 @@ class DataQualityNotifier:
             lines.append("- 없음")
         lines.extend(["", "대표 실패 구간:"])
         if samples:
-            for row in samples[:5]:
+            for row in samples[:20]:
                 lines.append(
                     f"- {row['source']} {row['symbol']} {row['interval']} {row['range_start']}~{row['range_end']} / {row['failure_reason']} / affected={row['affected_rows']}"
                 )
@@ -98,7 +119,7 @@ class DataQualityNotifier:
             lines.append("- 없음")
         lines.extend(["", "Indicator queue 요약:"])
         if queue_summary:
-            for row in queue_summary[:10]:
+            for row in queue_summary[:25]:
                 lines.append(
                     f"- {row['source']} {row['symbol']} {row['interval']} / {row['status']} / {row['failure_reason']}: {row['count']}건"
                 )
